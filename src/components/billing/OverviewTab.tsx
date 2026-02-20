@@ -1,8 +1,9 @@
+import { Link } from "react-router-dom";
 import type { PatientCase } from "@/types/billing";
 import { Currency } from "./Currency";
 import { mockInvoices, mockReceipts } from "@/data/mockBillingData";
 import { StatusBadge } from "./StatusBadge";
-import { FileText, CreditCard, CheckCircle2, Clock } from "lucide-react";
+import { FileText, CreditCard, CheckCircle2, Clock, ExternalLink } from "lucide-react";
 
 interface OverviewTabProps {
   patientCase: PatientCase;
@@ -123,9 +124,18 @@ export function OverviewTab({ patientCase }: OverviewTabProps) {
                     {inv.type} · {new Date(inv.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                   </p>
                 </div>
-                <div className="flex flex-col items-end gap-1">
-                  <Currency amount={inv.grossTotal} size="sm" />
-                  <StatusBadge status={inv.status} />
+                <div className="flex flex-col items-end gap-2">
+                  <div className="flex items-center gap-2">
+                    <Currency amount={inv.grossTotal} size="sm" />
+                    <StatusBadge status={inv.status} />
+                  </div>
+                  <Link
+                    to={`/pay/${inv.id}`}
+                    className="inline-flex items-center gap-1 text-xs font-medium transition-colors hover:opacity-80"
+                    style={{ color: "hsl(var(--primary))" }}
+                  >
+                    Patient View <ExternalLink size={10} />
+                  </Link>
                 </div>
               </div>
             ))}
@@ -139,7 +149,7 @@ export function OverviewTab({ patientCase }: OverviewTabProps) {
                   <p className="text-sm font-medium">{r.receiptNumber}</p>
                   <p className="text-xs text-muted-foreground">{r.gatewayRef}</p>
                 </div>
-                <Currency amount={r.amount} size="sm" className="text-emerald-600" />
+                <Currency amount={r.amount} size="sm" className="financial-positive" />
               </div>
             ))}
           </div>
