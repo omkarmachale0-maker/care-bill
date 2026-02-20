@@ -2,10 +2,39 @@ import { useState } from "react";
 import { mockInvoices } from "@/data/mockBillingData";
 import { StatusBadge } from "./StatusBadge";
 import { Currency } from "./Currency";
-import { Link, Upload, RefreshCw, AlertTriangle } from "lucide-react";
+import { ITEM_CATEGORIES, type LineItem } from "@/types/billing";
+import { Link, Upload, RefreshCw, AlertTriangle, Plus, Trash2, CheckCircle } from "lucide-react";
 
 type Mode = "SYSTEM" | "UPLOAD";
 type RefundStep = "idle" | "confirm";
+
+function generateId() {
+  return `li-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function calcLineItem(item: LineItem): LineItem {
+  const subtotal = item.quantity * item.unitPrice - item.discount;
+  const taxAmount = parseFloat(((subtotal * item.taxPercent) / 100).toFixed(2));
+  const lineTotal = parseFloat((subtotal + taxAmount).toFixed(2));
+  return { ...item, taxAmount, lineTotal };
+}
+
+const defaultLineItem = (): LineItem =>
+  calcLineItem({
+    id: generateId(),
+    name: "",
+    category: "Surgery",
+    quantity: 1,
+    unitPrice: 0,
+    discount: 0,
+    taxPercent: 0,
+    taxAmount: 0,
+    lineTotal: 0,
+  });
+
+const ADVANCE_PAID = 100000;
+const INTERIM_PAID = 150000;
+const TOTAL_PAYMENTS = ADVANCE_PAID + INTERIM_PAID;
 
 export function FinalInvoiceTab() {
   const [mode, setMode] = useState<Mode>("SYSTEM");
@@ -13,34 +42,148 @@ export function FinalInvoiceTab() {
   const [refundAmount, setRefundAmount] = useState("");
   const [refundReason, setRefundReason] = useState("");
 
+  // System mode state
+  const [lineItems, setLineItems] = useState<LineItem[]>([defaultLineItem()]);
+
+  // Upload mode state
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadDragOver, setUploadDragOver] = useState(false);
+  const [uploadInvoiceNumber, setUploadInvoiceNumber] = useState("");
+  const [uploadInvoiceDate, setUploadInvoiceDate] = useState("");
+  const [uploadDueDate, setUploadDueDate] = useState(
+    new Date(Date.now() + 3 * 86400000).toISOString().split("T")[0]
+  );
+  const [uploadTotalAmount, setUploadTotalAmount] = useState("");
+
   const finalInvoice = mockInvoices.find((inv) => inv.type === "FINAL");
 
-  const advancePaid = 100000;
-  const interimPaid = 150000;
-  const totalPaymentsReceived = advancePaid + interimPaid;
-  const grossFinalTotal = finalInvoice?.grossTotal ?? 0;
-  const netBalance = grossFinalTotal - totalPaymentsReceived;
+  // --- Calculations ---
+  const systemSubtotal = lineItems.reduce(
+    (acc, item) => acc + (item.quantity * item.unitPrice - item.discount),
+    0
+  );
+  const systemTotalTax = lineItems.reduce((acc, item) => acc + item.taxAmount, 0);
+  const systemGrossTotal = systemSubtotal + systemTotalTax;
+
+  const uploadedTotal = parseFloat(uploadTotalAmount) || 0;
+  const activeGrossTotal = finalInvoice
+    ? finalInvoice.grossTotal
+    : mode === "SYSTEM"
+    ? systemGrossTotal
+    : uploadedTotal;
+
+  const netBalance = activeGrossTotal - TOTAL_PAYMENTS;
   const isRefundable = netBalance < 0;
   const isBalanceDue = netBalance > 0;
   const refundableAmount = Math.abs(Math.min(netBalance, 0));
 
-  const reconciliationRows = [
-    { label: "Gross Final Total", value: grossFinalTotal, bold: true },
-    { label: "– Advance Paid", value: -advancePaid, negative: true },
-    { label: "– Interim Paid", value: -interimPaid, negative: true },
-  ];
+  // --- Helpers ---
+  const updateItem = (id: string, field: keyof LineItem, value: string | number) => {
+    setLineItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        return calcLineItem({ ...item, [field]: value });
+      })
+    );
+  };
+
+  const addItem = () => setLineItems((prev) => [...prev, defaultLineItem()]);
+
+  const removeItem = (id: string) => {
+    if (lineItems.length === 1) return;
+    setLineItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleFileDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setUploadDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file && file.type === "application/pdf") setUploadFile(file);
+  };
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) setUploadFile(file);
+  };
+
+  // ── Reconciliation summary rows (shared display) ──
+  const ReconciliationBox = ({ grossTotal }: { grossTotal: number }) => {
+    const net = grossTotal - TOTAL_PAYMENTS;
+    const refundable = net < 0;
+    return (
+      <div className="flex justify-end">
+        <div className="w-80 rounded-lg overflow-hidden border border-border">
+          <div className="p-4" style={{ background: "hsl(var(--surface-1))" }}>
+            <p className="section-label mb-3">Reconciliation Summary</p>
+            {[
+              { label: "Gross Final Total", value: grossTotal, sign: "" },
+              { label: "– Advance Paid", value: ADVANCE_PAID, sign: "–", muted: true },
+              { label: "– Interim Paid", value: INTERIM_PAID, sign: "–", muted: true },
+            ].map((row, i, arr) => (
+              <div
+                key={row.label}
+                className={`flex justify-between text-sm py-1.5 ${
+                  i < arr.length - 1 ? "border-b border-border/50" : ""
+                }`}
+              >
+                <span className={row.muted ? "text-muted-foreground" : "font-medium text-foreground"}>
+                  {row.label}
+                </span>
+                <span
+                  className={`tabular-nums font-medium ${row.muted ? "financial-negative" : ""}`}
+                >
+                  {row.sign}₹{row.value.toLocaleString("en-IN")}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div
+            className="px-4 py-3 flex justify-between items-center"
+            style={{
+              background: refundable
+                ? "hsl(var(--status-refundable-bg))"
+                : "hsl(var(--status-sent-bg))",
+            }}
+          >
+            <span
+              className="font-bold text-sm"
+              style={{
+                color: refundable
+                  ? "hsl(var(--status-refundable-fg))"
+                  : "hsl(var(--status-balance-fg))",
+              }}
+            >
+              {refundable ? "Refundable Amount" : "Balance Due"}
+            </span>
+            <span
+              className="tabular-nums font-bold text-base"
+              style={{
+                color: refundable
+                  ? "hsl(var(--status-refundable-fg))"
+                  : "hsl(var(--status-balance-fg))",
+              }}
+            >
+              ₹{Math.abs(net).toLocaleString("en-IN")}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
-      {/* Existing final invoice */}
+
+      {/* ── Existing final invoice view ── */}
       {finalInvoice && (
         <div className="card-base p-6">
           <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
             <div>
-              <p className="section-label mb-1">Final Invoice</p>
+              <p className="section-label mb-1">Final Invoice · {finalInvoice.mode === "UPLOAD" ? "Uploaded (HIS)" : "System-Generated"}</p>
               <h2 className="text-xl font-bold text-foreground">{finalInvoice.invoiceNumber}</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Dated: {new Date(finalInvoice.date).toLocaleDateString("en-IN")} · Due: {new Date(finalInvoice.dueDate).toLocaleDateString("en-IN")}
+                Dated: {new Date(finalInvoice.date).toLocaleDateString("en-IN")} · Due:{" "}
+                {new Date(finalInvoice.dueDate).toLocaleDateString("en-IN")}
               </p>
             </div>
             <div className="flex flex-col items-end gap-2">
@@ -60,24 +203,24 @@ export function FinalInvoiceTab() {
           </div>
 
           {/* Payment Reconciliation Summary */}
-          <div className="mb-5 p-4 bg-surface-1 rounded-lg border border-border">
+          <div className="mb-5 p-4 rounded-lg border border-border" style={{ background: "hsl(var(--surface-1))" }}>
             <p className="section-label mb-3">Payment Reconciliation Summary</p>
             <div className="grid grid-cols-3 gap-4">
               {[
-                { label: "Advance Paid", value: advancePaid },
-                { label: "Total Interim Paid", value: interimPaid },
-                { label: "Total Payments Received", value: totalPaymentsReceived },
+                { label: "Advance Paid", value: ADVANCE_PAID },
+                { label: "Total Interim Paid", value: INTERIM_PAID },
+                { label: "Total Payments Received", value: TOTAL_PAYMENTS },
               ].map((item) => (
                 <div key={item.label}>
                   <p className="text-xs text-muted-foreground mb-1">{item.label}</p>
-                  <Currency amount={item.value} size="md" className="text-emerald-600" />
+                  <Currency amount={item.value} size="md" className="financial-positive" />
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Line items */}
-          {finalInvoice.lineItems && (
+          {/* Line items (system-generated only) */}
+          {finalInvoice.lineItems && finalInvoice.lineItems.length > 0 && (
             <div className="overflow-x-auto mb-5">
               <p className="section-label mb-3">Itemized Final Charges</p>
               <table className="w-full text-sm">
@@ -100,59 +243,73 @@ export function FinalInvoiceTab() {
                       <td className="py-2 pr-3 text-muted-foreground">{item.category}</td>
                       <td className="py-2 pr-3 text-right tabular-nums">{item.quantity}</td>
                       <td className="py-2 pr-3 text-right tabular-nums">₹{item.unitPrice.toLocaleString("en-IN")}</td>
-                      <td className="py-2 pr-3 text-right tabular-nums text-destructive">
+                      <td className="py-2 pr-3 text-right tabular-nums financial-negative">
                         {item.discount > 0 ? `–₹${item.discount.toLocaleString("en-IN")}` : "–"}
                       </td>
                       <td className="py-2 pr-3 text-right tabular-nums">{item.taxPercent}%</td>
                       <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
                         {item.taxAmount > 0 ? `₹${item.taxAmount.toLocaleString("en-IN")}` : "–"}
                       </td>
-                      <td className="py-2 text-right tabular-nums font-semibold">₹{item.lineTotal.toLocaleString("en-IN")}</td>
+                      <td className="py-2 text-right tabular-nums font-semibold">
+                        ₹{item.lineTotal.toLocaleString("en-IN")}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <div className="flex justify-end gap-8 mt-3 pt-3 border-t border-border text-sm">
+                <span className="text-muted-foreground">
+                  Total Tax:{" "}
+                  <span className="font-medium text-foreground">
+                    ₹{finalInvoice.totalTax.toLocaleString("en-IN")}
+                  </span>
+                </span>
+                <span className="font-bold text-foreground">
+                  ₹{finalInvoice.grossTotal.toLocaleString("en-IN")}
+                </span>
+              </div>
             </div>
           )}
 
-          {/* Reconciliation box */}
-          <div className="flex justify-end">
-            <div className="w-80 rounded-lg overflow-hidden border border-border">
-              <div className="p-4 bg-surface-1">
-                <p className="section-label mb-3">Reconciliation Summary</p>
-                {reconciliationRows.map((row, i) => (
-                  <div key={i} className={`flex justify-between text-sm py-1.5 ${i < reconciliationRows.length - 1 ? "border-b border-border/50" : ""}`}>
-                    <span className={row.negative ? "text-muted-foreground" : "text-foreground font-medium"}>{row.label}</span>
-                    <span className={`tabular-nums font-medium ${row.negative ? "text-destructive" : ""}`}>
-                      {row.negative ? "" : ""}₹{Math.abs(row.value).toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                ))}
+          {/* Uploaded invoice gross total (HIS mode) */}
+          {finalInvoice.mode === "UPLOAD" && !finalInvoice.lineItems?.length && (
+            <div className="mb-5 flex items-center justify-between p-4 rounded-lg border border-border" style={{ background: "hsl(var(--surface-1))" }}>
+              <div>
+                <p className="section-label mb-1">Total Treatment Amount</p>
+                <Currency amount={finalInvoice.grossTotal} size="xl" className="text-foreground" />
               </div>
-              <div className={`px-4 py-3 flex justify-between items-center ${isRefundable ? "bg-purple-50" : "bg-amber-50"}`}>
-                <span className={`font-bold text-sm ${isRefundable ? "text-purple-700" : "text-amber-700"}`}>
-                  {isRefundable ? "Refundable Amount" : "Balance Due"}
-                </span>
-                <span className={`tabular-nums font-bold text-base ${isRefundable ? "text-purple-700" : "text-amber-700"}`}>
-                  ₹{Math.abs(netBalance).toLocaleString("en-IN")}
-                </span>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Upload size={13} />
+                <span>HIS Upload · No itemization</span>
               </div>
             </div>
-          </div>
+          )}
+
+          <ReconciliationBox grossTotal={finalInvoice.grossTotal} />
 
           {/* Refund section */}
           {isRefundable && (
-            <div className="mt-5 p-4 border border-purple-200 rounded-lg bg-purple-50">
+            <div
+              className="mt-5 p-4 rounded-lg border"
+              style={{
+                background: "hsl(var(--status-refundable-bg))",
+                borderColor: "hsl(var(--status-refundable-fg) / 0.25)",
+              }}
+            >
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-sm font-semibold text-purple-800 mb-1">Refund Available</p>
-                  <p className="text-xs text-purple-600">
-                    Total payments exceed final invoice. Refundable: <strong>₹{refundableAmount.toLocaleString("en-IN")}</strong>
+                  <p className="text-sm font-semibold mb-1" style={{ color: "hsl(var(--status-refundable-fg))" }}>
+                    Refund Available
+                  </p>
+                  <p className="text-xs" style={{ color: "hsl(var(--status-refundable-fg))" }}>
+                    Total payments exceed final invoice. Refundable:{" "}
+                    <strong>₹{refundableAmount.toLocaleString("en-IN")}</strong>
                   </p>
                 </div>
                 <button
                   onClick={() => setRefundStep("confirm")}
-                  className="px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 bg-purple-600 text-white hover:bg-purple-700 transition-colors flex-shrink-0"
+                  className="px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 text-white flex-shrink-0 transition-colors hover:opacity-90"
+                  style={{ background: "hsl(var(--status-refundable-fg))" }}
                 >
                   <RefreshCw size={14} />
                   Process Refund
@@ -162,18 +319,27 @@ export function FinalInvoiceTab() {
           )}
 
           {isBalanceDue && (
-            <div className="mt-5 p-4 border border-amber-200 rounded-lg bg-amber-50">
+            <div
+              className="mt-5 p-4 rounded-lg border"
+              style={{
+                background: "hsl(var(--status-sent-bg))",
+                borderColor: "hsl(var(--status-balance-fg) / 0.25)",
+              }}
+            >
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-sm font-semibold text-amber-800 mb-1">Balance Due</p>
-                  <p className="text-xs text-amber-600">
-                    Net balance of ₹{netBalance.toLocaleString("en-IN")} is outstanding. Payment link has been sent to patient.
+                  <p className="text-sm font-semibold mb-1" style={{ color: "hsl(var(--status-balance-fg))" }}>
+                    Balance Due
+                  </p>
+                  <p className="text-xs" style={{ color: "hsl(var(--status-balance-fg))" }}>
+                    Net balance of ₹{netBalance.toLocaleString("en-IN")} is outstanding. Payment link sent to patient.
                   </p>
                 </div>
                 {finalInvoice.razorpayLink && (
                   <a
                     href={finalInvoice.razorpayLink}
-                    className="px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 bg-amber-600 text-white hover:bg-amber-700 transition-colors flex-shrink-0"
+                    className="px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 text-white flex-shrink-0 transition-colors hover:opacity-90"
+                    style={{ background: "hsl(var(--status-balance-fg))" }}
                   >
                     <Link size={14} />
                     View Payment Link
@@ -185,17 +351,22 @@ export function FinalInvoiceTab() {
         </div>
       )}
 
-      {/* Refund modal overlay */}
+      {/* ── Refund modal ── */}
       {refundStep === "confirm" && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/20 backdrop-blur-sm">
-          <div className="card-base p-6 w-full max-w-md mx-4 shadow-summary">
+          <div className="card-base p-6 w-full max-w-md mx-4" style={{ boxShadow: "var(--shadow-summary)" }}>
             <div className="flex items-center gap-3 mb-5">
-              <div className="p-2 rounded-lg bg-purple-100">
-                <RefreshCw size={18} className="text-purple-600" />
+              <div
+                className="p-2 rounded-lg"
+                style={{ background: "hsl(var(--status-refundable-bg))" }}
+              >
+                <RefreshCw size={18} style={{ color: "hsl(var(--status-refundable-fg))" }} />
               </div>
               <div>
                 <h3 className="font-semibold text-foreground">Process Refund</h3>
-                <p className="text-xs text-muted-foreground">Max refundable: ₹{refundableAmount.toLocaleString("en-IN")}</p>
+                <p className="text-xs text-muted-foreground">
+                  Max refundable: ₹{refundableAmount.toLocaleString("en-IN")}
+                </p>
               </div>
             </div>
 
@@ -212,7 +383,9 @@ export function FinalInvoiceTab() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Refund Reason <span className="text-destructive">*</span></label>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Refund Reason <span className="text-destructive">*</span>
+                </label>
                 <textarea
                   value={refundReason}
                   onChange={(e) => setRefundReason(e.target.value)}
@@ -221,9 +394,15 @@ export function FinalInvoiceTab() {
                   className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-none"
                 />
               </div>
-              <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-lg border border-amber-200">
-                <AlertTriangle size={14} className="text-amber-600 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-amber-700">
+              <div
+                className="flex items-start gap-2 p-3 rounded-lg border"
+                style={{
+                  background: "hsl(var(--status-sent-bg))",
+                  borderColor: "hsl(var(--status-balance-fg) / 0.3)",
+                }}
+              >
+                <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" style={{ color: "hsl(var(--status-balance-fg))" }} />
+                <p className="text-xs" style={{ color: "hsl(var(--status-balance-fg))" }}>
                   This will trigger a Razorpay refund, update ledger entries, and generate a refund receipt. This action cannot be undone.
                 </p>
               </div>
@@ -231,14 +410,15 @@ export function FinalInvoiceTab() {
 
             <div className="flex gap-3 justify-end mt-5 pt-4 border-t border-border">
               <button
-                onClick={() => setRefundStep("idle")}
+                onClick={() => { setRefundStep("idle"); setRefundAmount(""); setRefundReason(""); }}
                 className="px-4 py-2 text-sm font-medium border border-border rounded-lg hover:bg-surface-1 transition-colors"
               >
                 Cancel
               </button>
               <button
                 disabled={!refundReason.trim() || !refundAmount}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ background: "hsl(var(--status-refundable-fg))" }}
               >
                 Confirm Refund
               </button>
@@ -247,11 +427,18 @@ export function FinalInvoiceTab() {
         </div>
       )}
 
-      {/* No final invoice — create form */}
+      {/* ── Create final invoice (shown only when none exists) ── */}
       {!finalInvoice && (
-        <div className="card-base p-6">
-          <div className="flex items-center justify-between mb-5">
-            <h3 className="font-semibold text-foreground">Create Final Invoice</h3>
+        <div
+          className="card-base p-6"
+          style={{ borderColor: "hsl(var(--primary) / 0.2)" }}
+        >
+          {/* Header + mode toggle */}
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-5">
+            <div>
+              <h3 className="font-semibold text-foreground">Create Final Invoice</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Only one final invoice allowed per case.</p>
+            </div>
             <div className="flex rounded-lg overflow-hidden border border-border">
               {(["SYSTEM", "UPLOAD"] as Mode[]).map((m) => (
                 <button
@@ -261,15 +448,311 @@ export function FinalInvoiceTab() {
                   style={
                     mode === m
                       ? { background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))" }
-                      : {}
+                      : { color: "hsl(var(--muted-foreground))" }
                   }
                 >
-                  {m === "SYSTEM" ? "System-Generated" : "Upload"}
+                  {m === "SYSTEM" ? "System-Generated" : "Upload (HIS)"}
                 </button>
               ))}
             </div>
           </div>
-          <p className="text-sm text-muted-foreground">Only one final invoice can be created per case.</p>
+
+          {/* Payment Reconciliation Summary (read-only, always visible) */}
+          <div className="mb-5 p-4 rounded-lg border border-border" style={{ background: "hsl(var(--surface-1))" }}>
+            <p className="section-label mb-3">Payment Reconciliation Summary</p>
+            <div className="grid grid-cols-3 gap-4">
+              {[
+                { label: "Advance Paid", value: ADVANCE_PAID },
+                { label: "Total Interim Paid", value: INTERIM_PAID },
+                { label: "Total Payments Received", value: TOTAL_PAYMENTS },
+              ].map((item) => (
+                <div key={item.label}>
+                  <p className="text-xs text-muted-foreground mb-0.5">{item.label}</p>
+                  <Currency amount={item.value} size="md" className="financial-positive" />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── SYSTEM MODE ── */}
+          {mode === "SYSTEM" && (
+            <>
+              <div className="mb-4">
+                <p className="section-label mb-3">Itemized Final Charges</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[820px]">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left py-2 pr-3 section-label w-1/4">Item Name</th>
+                        <th className="text-left py-2 pr-3 section-label w-1/6">Category</th>
+                        <th className="text-right py-2 pr-3 section-label w-14">Qty</th>
+                        <th className="text-right py-2 pr-3 section-label w-24">Unit Price</th>
+                        <th className="text-right py-2 pr-3 section-label w-24">Discount</th>
+                        <th className="text-right py-2 pr-3 section-label w-14">Tax %</th>
+                        <th className="text-right py-2 pr-3 section-label w-24">Tax Amt</th>
+                        <th className="text-right py-2 pr-3 section-label w-28">Line Total</th>
+                        <th className="py-2 w-8" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lineItems.map((item) => (
+                        <tr key={item.id} className="border-b border-border/50">
+                          <td className="py-2 pr-3">
+                            <input
+                              type="text"
+                              value={item.name}
+                              onChange={(e) => updateItem(item.id, "name", e.target.value)}
+                              placeholder="Item name"
+                              className="w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <select
+                              value={item.category}
+                              onChange={(e) => updateItem(item.id, "category", e.target.value)}
+                              className="w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                            >
+                              {ITEM_CATEGORIES.map((cat) => (
+                                <option key={cat} value={cat}>{cat}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-2 pr-3">
+                            <input
+                              type="number"
+                              value={item.quantity}
+                              onChange={(e) => updateItem(item.id, "quantity", parseFloat(e.target.value) || 0)}
+                              min="1"
+                              className="w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background text-right focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <input
+                              type="number"
+                              value={item.unitPrice}
+                              onChange={(e) => updateItem(item.id, "unitPrice", parseFloat(e.target.value) || 0)}
+                              min="0"
+                              className="w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background text-right focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <input
+                              type="number"
+                              value={item.discount}
+                              onChange={(e) => updateItem(item.id, "discount", parseFloat(e.target.value) || 0)}
+                              min="0"
+                              className="w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background text-right focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <input
+                              type="number"
+                              value={item.taxPercent}
+                              onChange={(e) => updateItem(item.id, "taxPercent", parseFloat(e.target.value) || 0)}
+                              min="0"
+                              max="100"
+                              className="w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background text-right focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                            />
+                          </td>
+                          <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                            ₹{item.taxAmount.toLocaleString("en-IN")}
+                          </td>
+                          <td className="py-2 pr-3 text-right tabular-nums font-semibold">
+                            ₹{item.lineTotal.toLocaleString("en-IN")}
+                          </td>
+                          <td className="py-2">
+                            <button
+                              onClick={() => removeItem(item.id)}
+                              disabled={lineItems.length === 1}
+                              className="p-1 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-30"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  onClick={addItem}
+                  className="mt-3 flex items-center gap-1.5 text-sm font-medium transition-colors hover:opacity-80"
+                  style={{ color: "hsl(var(--primary))" }}
+                >
+                  <Plus size={14} />
+                  Add Line Item
+                </button>
+              </div>
+
+              {/* Invoice summary + reconciliation side by side */}
+              <div className="flex flex-wrap justify-end gap-4 mt-2">
+                <div
+                  className="w-72 rounded-lg p-4 border border-border space-y-2"
+                  style={{ background: "hsl(var(--surface-1))" }}
+                >
+                  <p className="section-label mb-3">Invoice Summary</p>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Subtotal</span>
+                    <span className="tabular-nums font-medium">₹{systemSubtotal.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Total Tax</span>
+                    <span className="tabular-nums font-medium">₹{systemTotalTax.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between text-base font-bold border-t border-border pt-2 mt-2">
+                    <span>Gross Total</span>
+                    <span className="tabular-nums" style={{ color: "hsl(var(--primary))" }}>
+                      ₹{systemGrossTotal.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm pt-1">
+                    <label className="text-muted-foreground">Due Date</label>
+                    <input
+                      type="date"
+                      className="text-sm border border-border rounded px-2 py-0.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                      defaultValue={new Date(Date.now() + 3 * 86400000).toISOString().split("T")[0]}
+                    />
+                  </div>
+                </div>
+
+                <ReconciliationBox grossTotal={systemGrossTotal} />
+              </div>
+            </>
+          )}
+
+          {/* ── UPLOAD (HIS) MODE ── */}
+          {mode === "UPLOAD" && (
+            <div className="space-y-5">
+              {/* Drop zone */}
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">Upload Final Invoice PDF</label>
+                <label
+                  className="block cursor-pointer"
+                  onDragOver={(e) => { e.preventDefault(); setUploadDragOver(true); }}
+                  onDragLeave={() => setUploadDragOver(false)}
+                  onDrop={handleFileDrop}
+                >
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    onChange={handleFileInput}
+                  />
+                  <div
+                    className="border-2 border-dashed rounded-lg p-8 text-center transition-colors"
+                    style={{
+                      borderColor: uploadDragOver
+                        ? "hsl(var(--primary))"
+                        : uploadFile
+                        ? "hsl(var(--status-paid-fg))"
+                        : "hsl(var(--border))",
+                      background: uploadFile
+                        ? "hsl(var(--status-paid-bg))"
+                        : "hsl(var(--surface-1))",
+                    }}
+                  >
+                    {uploadFile ? (
+                      <>
+                        <CheckCircle size={28} className="mx-auto mb-2" style={{ color: "hsl(var(--status-paid-fg))" }} />
+                        <p className="text-sm font-medium text-foreground">{uploadFile.name}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {(uploadFile.size / 1024 / 1024).toFixed(2)} MB · Click to replace
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={28} className="mx-auto mb-2 text-muted-foreground" />
+                        <p className="text-sm font-medium text-foreground">
+                          Drop PDF here or click to browse
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">PDF only · Max 10MB</p>
+                      </>
+                    )}
+                  </div>
+                </label>
+              </div>
+
+              {/* Form fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Invoice Number</label>
+                  <input
+                    type="text"
+                    value={uploadInvoiceNumber}
+                    onChange={(e) => setUploadInvoiceNumber(e.target.value)}
+                    placeholder="FIN-2024-0891-01"
+                    className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Total Treatment Amount (₹)</label>
+                  <input
+                    type="number"
+                    value={uploadTotalAmount}
+                    onChange={(e) => setUploadTotalAmount(e.target.value)}
+                    min="1"
+                    placeholder="0.00"
+                    className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Invoice Date</label>
+                  <input
+                    type="date"
+                    value={uploadInvoiceDate}
+                    onChange={(e) => setUploadInvoiceDate(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Due Date</label>
+                  <input
+                    type="date"
+                    value={uploadDueDate}
+                    onChange={(e) => setUploadDueDate(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+              </div>
+
+              {/* Live reconciliation preview (shows as soon as amount is entered) */}
+              {uploadedTotal > 0 && (
+                <div className="pt-2">
+                  <p className="section-label mb-3">Auto-Adjusted Reconciliation</p>
+                  <ReconciliationBox grossTotal={uploadedTotal} />
+                </div>
+              )}
+
+              {/* Info note */}
+              <div
+                className="flex items-start gap-2 p-3 rounded-lg border"
+                style={{
+                  background: "hsl(var(--accent))",
+                  borderColor: "hsl(var(--primary) / 0.2)",
+                }}
+              >
+                <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" style={{ color: "hsl(var(--primary))" }} />
+                <p className="text-xs" style={{ color: "hsl(var(--accent-foreground))" }}>
+                  The system will auto-calculate the net balance as:{" "}
+                  <strong>Total Amount − (Advance + Interim Paid)</strong>. Settlement logic is identical to system mode.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex gap-3 justify-end mt-6 pt-5 border-t border-border">
+            <button className="px-4 py-2 text-sm font-medium text-foreground border border-border rounded-lg hover:bg-surface-1 transition-colors">
+              Save as Draft
+            </button>
+            <button
+              className="px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 transition-colors hover:opacity-90 text-white"
+              style={{ background: "hsl(var(--primary))" }}
+            >
+              <Link size={14} />
+              {mode === "SYSTEM" ? "Generate & Send Payment Link" : "Submit & Process Settlement"}
+            </button>
+          </div>
         </div>
       )}
     </div>
