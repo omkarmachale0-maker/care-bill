@@ -1,20 +1,28 @@
 import { Link } from "react-router-dom";
 import type { PatientCase } from "@/types/billing";
+import type { ComputedFinancials } from "@/services/billingApi";
 import { Currency } from "./Currency";
-import { mockInvoices, mockReceipts } from "@/data/mockBillingData";
 import { StatusBadge } from "./StatusBadge";
-import { FileText, CreditCard, CheckCircle2, Clock, ExternalLink } from "lucide-react";
+import { BillingSkeleton } from "./BillingSkeleton";
+import { useInvoices, useReceipts } from "@/hooks/useBillingData";
+import { FileText, CreditCard, CheckCircle2, Clock, ExternalLink, AlertTriangle } from "lucide-react";
 
 interface OverviewTabProps {
+  caseId: string;
   patientCase: PatientCase;
+  financials: ComputedFinancials;
 }
 
-export function OverviewTab({ patientCase }: OverviewTabProps) {
-  const { financials } = patientCase;
-  const totalPaid = financials.advancePaid + financials.interimPaid;
-  const progress = Math.min((totalPaid / financials.quotationTotal) * 100, 100);
+export function OverviewTab({ caseId, patientCase, financials }: OverviewTabProps) {
+  const { data: invoices, isLoading: invoicesLoading } = useInvoices(caseId);
+  const { data: receipts, isLoading: receiptsLoading } = useReceipts(caseId);
 
-  const recentInvoices = mockInvoices.slice(0, 3);
+  if (invoicesLoading || receiptsLoading) return <BillingSkeleton rows={3} />;
+
+  const recentInvoices = (invoices ?? []).slice(0, 3);
+  const recentReceipts = (receipts ?? []).slice(0, 3);
+
+  const progress = Math.min(financials.progressPercent, 100);
 
   const statCards = [
     {
@@ -23,32 +31,46 @@ export function OverviewTab({ patientCase }: OverviewTabProps) {
       icon: FileText,
       color: "text-primary",
       bgColor: "bg-teal-50",
+      badge: null as string | null,
     },
     {
       label: "Total Received",
-      value: totalPaid,
+      value: financials.totalReceived,
       icon: CheckCircle2,
       color: "text-emerald-600",
       bgColor: "bg-emerald-50",
+      badge: null,
     },
     {
       label: "Outstanding",
       value: financials.outstanding,
       icon: Clock,
-      color: "text-amber-600",
-      bgColor: "bg-amber-50",
+      color: financials.isFullyPaid ? "text-emerald-600" : "text-amber-600",
+      bgColor: financials.isFullyPaid ? "bg-emerald-50" : "bg-amber-50",
+      badge: financials.isFullyPaid ? "Fully Paid" : financials.outstanding > 0 ? "Due" : null,
     },
     {
       label: "Final Invoice",
-      value: financials.finalTotal,
+      value: financials.finalInvoiceAmount ?? 0,
       icon: CreditCard,
       color: "text-primary",
       bgColor: "bg-teal-50",
+      badge: financials.finalInvoiceAmount === null ? "Not Generated" : null,
     },
   ];
 
   return (
     <div className="space-y-6">
+      {/* Overpayment warning */}
+      {financials.isOverpaid && (
+        <div className="flex items-center gap-2.5 px-4 py-3 rounded-lg border" style={{ background: "hsl(var(--status-sent-bg))", borderColor: "hsl(var(--status-sent-fg) / 0.3)" }}>
+          <AlertTriangle size={14} style={{ color: "hsl(var(--status-sent-fg))" }} />
+          <p className="text-sm" style={{ color: "hsl(var(--status-sent-fg))" }}>
+            <strong>Overpayment detected.</strong> Total received exceeds the quotation amount.
+          </p>
+        </div>
+      )}
+
       {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((stat) => (
@@ -59,7 +81,18 @@ export function OverviewTab({ patientCase }: OverviewTabProps) {
                 <stat.icon size={16} className={stat.color} />
               </div>
             </div>
-            <Currency amount={stat.value} size="lg" className={stat.color} />
+            {stat.badge === "Not Generated" ? (
+              <p className="text-sm font-medium text-muted-foreground">Not Generated</p>
+            ) : (
+              <Currency amount={stat.value} size="lg" className={stat.color} />
+            )}
+            {stat.badge && stat.badge !== "Not Generated" && (
+              <span className={`inline-block mt-2 text-xs px-2 py-0.5 rounded-full font-medium ${
+                stat.badge === "Fully Paid" ? "status-paid" : "status-sent"
+              }`}>
+                {stat.badge}
+              </span>
+            )}
           </div>
         ))}
       </div>
@@ -75,13 +108,15 @@ export function OverviewTab({ patientCase }: OverviewTabProps) {
             className="h-2.5 rounded-full transition-all duration-700"
             style={{
               width: `${progress}%`,
-              background: "linear-gradient(90deg, hsl(var(--primary)), hsl(199 89% 55%))",
+              background: financials.isOverpaid
+                ? "hsl(var(--status-sent-fg))"
+                : "linear-gradient(90deg, hsl(var(--primary)), hsl(199 89% 55%))",
             }}
           />
         </div>
         <div className="flex justify-between text-xs text-muted-foreground mt-2">
           <span>
-            {new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(totalPaid)} received
+            {new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(financials.totalReceived)} received
           </span>
           <span>
             {new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(financials.quotationTotal)} total
@@ -112,7 +147,7 @@ export function OverviewTab({ patientCase }: OverviewTabProps) {
           </dl>
         </div>
 
-        {/* Recent invoices */}
+        {/* Recent invoices & receipts */}
         <div className="card-base p-6">
           <h3 className="font-semibold text-foreground mb-4">Recent Invoices</h3>
           <div className="space-y-3">
@@ -143,7 +178,7 @@ export function OverviewTab({ patientCase }: OverviewTabProps) {
 
           <div className="mt-4 pt-4 border-t border-border">
             <h4 className="text-sm font-semibold text-foreground mb-3">Recent Receipts</h4>
-            {mockReceipts.map((r) => (
+            {recentReceipts.map((r) => (
               <div key={r.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
                 <div>
                   <p className="text-sm font-medium">{r.receiptNumber}</p>

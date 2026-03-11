@@ -1,11 +1,20 @@
-import { mockInvoices } from "@/data/mockBillingData";
+import { useInvoicesByType } from "@/hooks/useBillingData";
 import { StatusBadge } from "./StatusBadge";
 import { Currency } from "./Currency";
+import { BillingSkeleton } from "./BillingSkeleton";
 import { Eye, Lock } from "lucide-react";
 
-export function ProformaTab() {
-  const proforma = mockInvoices.find((inv) => inv.type === "PROFORMA");
-  if (!proforma) return null;
+interface ProformaTabProps {
+  caseId: string;
+}
+
+export function ProformaTab({ caseId }: ProformaTabProps) {
+  const { data: proformas, isLoading } = useInvoicesByType(caseId, "PROFORMA");
+
+  if (isLoading) return <BillingSkeleton rows={2} />;
+
+  const proforma = proformas?.[0];
+  if (!proforma) return <p className="text-sm text-muted-foreground">No proforma invoice found.</p>;
 
   const subtotalCalc = (proforma.lineItems ?? []).reduce((acc, item) => acc + (item.quantity * item.unitPrice - item.discount), 0);
 
@@ -105,14 +114,14 @@ export function ProformaTab() {
         </div>
       </div>
 
-      {/* Read-only summary */}
+      {/* Advance Collection Summary */}
       <div className="card-base p-6">
         <h3 className="font-semibold text-foreground mb-4">Advance Collection Summary</h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           {[
-            { label: "Quotation Total", value: 480000, neutral: true },
-            { label: "Advance Requested", value: 100000, neutral: true },
-            { label: "Advance Paid", value: 100000, positive: true },
+            { label: "Quotation Total", value: proforma.grossTotal, positive: false },
+            { label: "Advance Requested", value: proforma.grossTotal > 0 ? Math.min(proforma.grossTotal, 100000) : 0, positive: false },
+            { label: "Advance Paid", value: proforma.status === "PAID" ? (proforma.grossTotal > 0 ? Math.min(proforma.grossTotal, 100000) : 0) : 0, positive: true },
           ].map((item) => (
             <div key={item.label} className="bg-surface-1 rounded-lg p-4 border border-border">
               <p className="section-label mb-2">{item.label}</p>

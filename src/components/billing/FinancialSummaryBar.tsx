@@ -1,21 +1,20 @@
 import type { PatientCase } from "@/types/billing";
-import { Currency } from "./Currency";
+import type { ComputedFinancials } from "@/services/billingApi";
 import { Calendar, User, MapPin, Stethoscope } from "lucide-react";
 
 interface FinancialSummaryBarProps {
   patientCase: PatientCase;
+  financials: ComputedFinancials;
 }
 
-export function FinancialSummaryBar({ patientCase }: FinancialSummaryBarProps) {
-  const { financials } = patientCase;
-
+export function FinancialSummaryBar({ patientCase, financials }: FinancialSummaryBarProps) {
   const summaryItems = [
-    { label: "Quotation", value: financials.quotationTotal, neutral: true },
-    { label: "Advance Paid", value: financials.advancePaid, positive: true },
-    { label: "Interim Raised", value: financials.interimRaised, neutral: true },
-    { label: "Interim Paid", value: financials.interimPaid, positive: true },
-    { label: "Total Received", value: financials.advancePaid + financials.interimPaid, positive: true },
-    { label: "Outstanding", value: financials.outstanding, negative: true },
+    { label: "Quotation", value: financials.quotationTotal },
+    { label: "Advance Paid", value: financials.advancePaid },
+    { label: "Interim Raised", value: financials.interimRaised },
+    { label: "Interim Paid", value: financials.interimPaid },
+    { label: "Total Received", value: financials.totalReceived },
+    { label: "Outstanding", value: financials.outstanding },
   ];
 
   return (
