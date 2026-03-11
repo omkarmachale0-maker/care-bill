@@ -1,5 +1,7 @@
-import { mockLedger, mockAuditLogs } from "@/data/mockBillingData";
-import { ArrowUpRight, ArrowDownLeft, Shield } from "lucide-react";
+import { useState } from "react";
+import { useLedgerEntries, useLedgerBalances, useAuditLogs } from "@/hooks/useBillingData";
+import { BillingSkeleton } from "./BillingSkeleton";
+import { ArrowUpRight, ArrowDownLeft, Shield, Download } from "lucide-react";
 
 const LEDGER_NAMES = [
   "All",
@@ -10,26 +12,61 @@ const LEDGER_NAMES = [
   "Refund Liability Ledger",
 ];
 
-export function LedgerAuditTab() {
+interface LedgerAuditTabProps {
+  caseId: string;
+}
+
+export function LedgerAuditTab({ caseId }: LedgerAuditTabProps) {
+  const [activeLedger, setActiveLedger] = useState("All");
+  const { data: ledgerEntries, isLoading: ledgerLoading } = useLedgerEntries(caseId, activeLedger);
+  const { data: ledgerBalances, isLoading: balancesLoading } = useLedgerBalances(caseId);
+  const { data: auditLogs, isLoading: auditLoading } = useAuditLogs(caseId);
+
+  if (ledgerLoading || balancesLoading || auditLoading) return <BillingSkeleton rows={4} />;
+
+  const handleExportCSV = () => {
+    if (!ledgerEntries?.length) return;
+    const headers = ["Date", "Description", "Ledger", "Debit", "Credit", "Balance", "Reference"];
+    const rows = ledgerEntries.map((e) => [e.date, e.description, e.ledger, e.debit, e.credit, e.balance, e.reference]);
+    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ledger-${caseId}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6">
       {/* Ledger engine */}
       <div className="card-base p-6">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
           <h3 className="font-semibold text-foreground">Ledger Engine</h3>
-          <div className="flex gap-2 flex-wrap">
-            {LEDGER_NAMES.map((name) => (
-              <button
-                key={name}
-                className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
-                  name === "All"
-                    ? "border-primary text-primary bg-teal-50"
-                    : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
-                }`}
-              >
-                {name}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <div className="flex gap-2 flex-wrap">
+              {LEDGER_NAMES.map((name) => (
+                <button
+                  key={name}
+                  onClick={() => setActiveLedger(name)}
+                  className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
+                    activeLedger === name
+                      ? "border-primary text-primary bg-teal-50"
+                      : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                  }`}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={handleExportCSV}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-primary text-primary hover:bg-accent transition-colors"
+            >
+              <Download size={12} />
+              CSV
+            </button>
           </div>
         </div>
 
@@ -47,7 +84,7 @@ export function LedgerAuditTab() {
               </tr>
             </thead>
             <tbody>
-              {mockLedger.map((entry) => (
+              {(ledgerEntries ?? []).map((entry) => (
                 <tr key={entry.id} className="border-b border-border/60 hover:bg-surface-1 transition-colors">
                   <td className="py-3 pr-4 text-muted-foreground text-xs whitespace-nowrap">{entry.date}</td>
                   <td className="py-3 pr-4 text-foreground">{entry.description}</td>
@@ -88,13 +125,7 @@ export function LedgerAuditTab() {
 
         {/* Ledger balances summary */}
         <div className="mt-5 pt-5 border-t border-border grid grid-cols-2 sm:grid-cols-5 gap-3">
-          {[
-            { label: "Escrow", value: 250000 },
-            { label: "Hospital Payable", value: 250000 },
-            { label: "Gateway Expense", value: 5000 },
-            { label: "Revenue (Commission)", value: 3750 },
-            { label: "Refund Liability", value: 0 },
-          ].map((item) => (
+          {(ledgerBalances ?? []).map((item) => (
             <div key={item.label} className="bg-surface-1 rounded-lg p-3 border border-border">
               <p className="text-xs text-muted-foreground mb-1">{item.label}</p>
               <p className="text-sm font-bold tabular-nums text-foreground">₹{item.value.toLocaleString("en-IN")}</p>
@@ -125,7 +156,7 @@ export function LedgerAuditTab() {
               </tr>
             </thead>
             <tbody>
-              {mockAuditLogs.map((log) => (
+              {(auditLogs ?? []).map((log) => (
                 <tr key={log.id} className="border-b border-border/60 hover:bg-surface-1 transition-colors">
                   <td className="py-3 pr-4 text-muted-foreground text-xs whitespace-nowrap font-mono">{log.timestamp}</td>
                   <td className="py-3 pr-4">

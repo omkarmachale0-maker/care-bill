@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { mockInvoices } from "@/data/mockBillingData";
+import { useInvoicesByType } from "@/hooks/useBillingData";
+import type { ComputedFinancials } from "@/services/billingApi";
 import { StatusBadge } from "./StatusBadge";
 import { Currency } from "./Currency";
+import { BillingSkeleton } from "./BillingSkeleton";
 import { ITEM_CATEGORIES, type LineItem } from "@/types/billing";
-import { Plus, Trash2, Link, Upload, ChevronDown, CheckCircle } from "lucide-react";
+import { Plus, Trash2, Link, Upload, CheckCircle } from "lucide-react";
 
 function generateId() {
   return `li-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -18,7 +20,13 @@ function calcLineItem(item: LineItem): LineItem {
 
 type Mode = "SYSTEM" | "UPLOAD";
 
-export function InterimInvoicesTab() {
+interface InterimInvoicesTabProps {
+  caseId: string;
+  financials: ComputedFinancials;
+}
+
+export function InterimInvoicesTab({ caseId, financials }: InterimInvoicesTabProps) {
+  const { data: interimInvoices, isLoading } = useInvoicesByType(caseId, "INTERIM");
   const [mode, setMode] = useState<Mode>("SYSTEM");
   const [showCreate, setShowCreate] = useState(false);
   const [lineItems, setLineItems] = useState<LineItem[]>([
@@ -35,8 +43,9 @@ export function InterimInvoicesTab() {
     }),
   ]);
 
-  // Existing interim invoices
-  const existingInterims = mockInvoices.filter((inv) => inv.type === "INTERIM");
+  if (isLoading) return <BillingSkeleton rows={3} />;
+
+  const existingInterims = interimInvoices ?? [];
 
   const updateItem = (id: string, field: keyof LineItem, value: string | number) => {
     setLineItems((prev) =>
@@ -75,11 +84,11 @@ export function InterimInvoicesTab() {
   const grossTotal = subtotal + totalTax;
 
   const caseFinancialSummary = [
-    { label: "Quotation Total", value: 480000 },
-    { label: "Advance Paid", value: 100000 },
-    { label: "Interim Raised", value: 150000 },
-    { label: "Interim Paid", value: 150000 },
-    { label: "Outstanding", value: 212000 },
+    { label: "Quotation Total", value: financials.quotationTotal },
+    { label: "Advance Paid", value: financials.advancePaid },
+    { label: "Interim Raised", value: financials.interimRaised },
+    { label: "Interim Paid", value: financials.interimPaid },
+    { label: "Outstanding", value: financials.outstanding },
   ];
 
   return (
@@ -97,6 +106,12 @@ export function InterimInvoicesTab() {
             New Interim Invoice
           </button>
         </div>
+
+        {existingInterims.length === 0 && !showCreate && (
+          <div className="card-base p-8 text-center">
+            <p className="text-sm text-muted-foreground">No interim invoices yet. Click "New Interim Invoice" to create one.</p>
+          </div>
+        )}
 
         <div className="space-y-3">
           {existingInterims.map((inv) => (
@@ -180,7 +195,6 @@ export function InterimInvoicesTab() {
         <div className="card-base p-6 border-primary/20" style={{ borderColor: "hsl(var(--primary) / 0.2)" }}>
           <div className="flex items-center justify-between mb-5">
             <h3 className="font-semibold text-foreground">Create New Interim Invoice</h3>
-            {/* Mode toggle */}
             <div className="flex rounded-lg overflow-hidden border border-border">
               <button
                 onClick={() => setMode("SYSTEM")}
@@ -207,7 +221,7 @@ export function InterimInvoicesTab() {
             </div>
           </div>
 
-          {/* Case financial summary (read-only) */}
+          {/* Case financial summary (read-only, from computed financials) */}
           <div className="mb-5 p-4 bg-surface-1 rounded-lg border border-border">
             <p className="section-label mb-3">Case Financial Summary</p>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">

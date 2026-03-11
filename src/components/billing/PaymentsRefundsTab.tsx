@@ -1,44 +1,19 @@
-import { mockReceipts } from "@/data/mockBillingData";
+import { usePayments, useEscrowSummary, useReceipts } from "@/hooks/useBillingData";
 import { Currency } from "./Currency";
 import { StatusBadge } from "./StatusBadge";
+import { BillingSkeleton } from "./BillingSkeleton";
 import { Download, CheckCircle2, Upload, CreditCard } from "lucide-react";
 
-export function PaymentsRefundsTab() {
-  const payments = [
-    {
-      id: "PAY-001",
-      date: "2024-12-01",
-      description: "Advance payment – Proforma invoice",
-      amount: 100000,
-      method: "Razorpay",
-      reference: "pay_RZP291823ABC",
-      invoiceRef: "PRF-2024-0891-01",
-      status: "PAID",
-      gatewayFee: 2000,
-      platformFee: 1500,
-    },
-    {
-      id: "PAY-002",
-      date: "2024-12-07",
-      description: "Interim payment – Interim invoice #1",
-      amount: 150000,
-      method: "Razorpay",
-      reference: "pay_RZP391823XYZ",
-      invoiceRef: "INT-2024-0891-01",
-      status: "PAID",
-      gatewayFee: 3000,
-      platformFee: 2250,
-    },
-  ];
+interface PaymentsRefundsTabProps {
+  caseId: string;
+}
 
-  const escrowSummary = [
-    { label: "Total Collected in Escrow", value: 250000, positive: true },
-    { label: "Gateway Charges Deducted", value: 5000, negative: true },
-    { label: "Platform Commission", value: 3750, negative: true },
-    { label: "Net Escrow Balance", value: 241250, positive: true },
-    { label: "Released to Hospital", value: 0 },
-    { label: "Pending Release", value: 241250 },
-  ];
+export function PaymentsRefundsTab({ caseId }: PaymentsRefundsTabProps) {
+  const { data: payments, isLoading: paymentsLoading } = usePayments(caseId);
+  const { data: escrowSummary, isLoading: escrowLoading } = useEscrowSummary(caseId);
+  const { data: receipts, isLoading: receiptsLoading } = useReceipts(caseId);
+
+  if (paymentsLoading || escrowLoading || receiptsLoading) return <BillingSkeleton rows={3} />;
 
   return (
     <div className="space-y-6">
@@ -46,7 +21,7 @@ export function PaymentsRefundsTab() {
       <div className="card-base p-6">
         <h3 className="font-semibold text-foreground mb-5">Payment History</h3>
         <div className="space-y-4">
-          {payments.map((pay) => (
+          {(payments ?? []).map((pay) => (
             <div key={pay.id} className="border border-border rounded-lg p-4 hover:border-primary/30 transition-colors">
               <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
                 <div>
@@ -88,7 +63,7 @@ export function PaymentsRefundsTab() {
       <div className="card-base p-6">
         <h3 className="font-semibold text-foreground mb-5">Escrow Summary</h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          {escrowSummary.map((item) => (
+          {(escrowSummary ?? []).map((item) => (
             <div key={item.label} className="bg-surface-1 rounded-lg p-4 border border-border">
               <p className="section-label mb-2">{item.label}</p>
               <Currency
@@ -111,7 +86,7 @@ export function PaymentsRefundsTab() {
           </button>
         </div>
         <div className="space-y-3">
-          {mockReceipts.map((receipt) => (
+          {(receipts ?? []).map((receipt) => (
             <div key={receipt.id} className="flex items-center justify-between p-4 bg-surface-1 rounded-lg border border-border">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-teal-50">

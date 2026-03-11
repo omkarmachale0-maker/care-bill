@@ -6,8 +6,11 @@ import { InterimInvoicesTab } from "@/components/billing/InterimInvoicesTab";
 import { FinalInvoiceTab } from "@/components/billing/FinalInvoiceTab";
 import { PaymentsRefundsTab } from "@/components/billing/PaymentsRefundsTab";
 import { LedgerAuditTab } from "@/components/billing/LedgerAuditTab";
-import { mockPatientCase } from "@/data/mockBillingData";
+import { useCaseSummary } from "@/hooks/useBillingData";
+import { BillingSkeleton } from "@/components/billing/BillingSkeleton";
 import { LayoutDashboard, FileText, FilePlus, FileCheck2, CreditCard, BookOpen, ChevronRight, type LucideIcon } from "lucide-react";
+
+const CASE_ID = "CASE-2024-0891";
 
 type Tab = "overview" | "proforma" | "interim" | "final" | "payments" | "ledger";
 
@@ -22,27 +25,29 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const { data: caseSummary, isLoading } = useCaseSummary(CASE_ID);
 
-  const ActiveComponent = {
-    overview: OverviewTab,
-    proforma: ProformaTab,
-    interim: InterimInvoicesTab,
-    final: FinalInvoiceTab,
-    payments: PaymentsRefundsTab,
-    ledger: LedgerAuditTab,
-  }[activeTab];
+  if (isLoading || !caseSummary) {
+    return (
+      <div className="min-h-screen bg-surface-1 p-6">
+        <BillingSkeleton rows={4} />
+      </div>
+    );
+  }
+
+  const { patientCase, financials } = caseSummary;
 
   return (
     <div className="min-h-screen bg-surface-1">
-      {/* Financial Summary Bar */}
-      <FinancialSummaryBar patientCase={mockPatientCase} />
+      {/* Financial Summary Bar — driven by computed financials */}
+      <FinancialSummaryBar patientCase={patientCase} financials={financials} />
 
       {/* Breadcrumb */}
       <div className="px-6 pt-4 pb-0">
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-4">
           <span>Billing</span>
           <ChevronRight size={12} />
-          <span>{mockPatientCase.caseNumber}</span>
+          <span>{patientCase.caseNumber}</span>
           <ChevronRight size={12} />
           <span className="text-foreground font-medium">{TABS.find((t) => t.id === activeTab)?.label}</span>
         </div>
@@ -68,12 +73,12 @@ const Index = () => {
 
       {/* Tab content */}
       <div className="px-6 py-6">
-        {activeTab === "overview" && <OverviewTab patientCase={mockPatientCase} />}
-        {activeTab === "proforma" && <ProformaTab />}
-        {activeTab === "interim" && <InterimInvoicesTab />}
-        {activeTab === "final" && <FinalInvoiceTab />}
-        {activeTab === "payments" && <PaymentsRefundsTab />}
-        {activeTab === "ledger" && <LedgerAuditTab />}
+        {activeTab === "overview" && <OverviewTab caseId={CASE_ID} patientCase={patientCase} financials={financials} />}
+        {activeTab === "proforma" && <ProformaTab caseId={CASE_ID} />}
+        {activeTab === "interim" && <InterimInvoicesTab caseId={CASE_ID} financials={financials} />}
+        {activeTab === "final" && <FinalInvoiceTab caseId={CASE_ID} financials={financials} />}
+        {activeTab === "payments" && <PaymentsRefundsTab caseId={CASE_ID} />}
+        {activeTab === "ledger" && <LedgerAuditTab caseId={CASE_ID} />}
       </div>
     </div>
   );
